@@ -1,0 +1,1459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>MosaicGuard — Overlay Mosaic Crochet Engine</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdfa',
+              100: '#ccfbf1',
+              500: '#14b8a6',
+              600: '#0d9488',
+              700: '#0f766e',
+              800: '#115e59',
+              900: '#134e4a',
+              950: '#042f2e',
+            }
+          },
+          fontFamily: {
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace']
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- PDF.js from Mozilla CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  </script>
+
+  <!-- React & Babel for in-browser execution -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    
+    .checker-bg {
+      background-size: 20px 20px;
+      background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+      background-image: linear-gradient(45deg, #1e293b 25%, transparent 25%),
+                        linear-gradient(-45deg, #1e293b 25%, transparent 25%),
+                        linear-gradient(45deg, transparent 75%, #1e293b 75%),
+                        linear-gradient(-45deg, transparent 75%, #1e293b 75%);
+    }
+
+    @media print {
+      body { background: white !important; color: black !important; }
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen antialiased flex flex-col font-sans selection:bg-brand-500 selection:text-white">
+  <div id="root" class="flex-1 flex flex-col"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+    // Cross-platform input accept string ensuring Android Safari & Chrome expose both PDF and Images
+    const FILE_INPUT_ACCEPT = "image/*,application/pdf,.pdf,image/png,image/jpeg,image/webp,image/svg+xml,application/json,.json";
+
+    // =========================================================================
+    // 1. CROCHET KNOWLEDGE BASE & OVERLAY MOSAIC TERMINOLOGY
+    // =========================================================================
+    const CROCHET_DICTIONARY = {
+      US: {
+        SC_BLO: { name: 'Single Crochet in Back Loop Only', abbrev: 'sc blo', uk: 'dc blo', code: 'SC_BLO' },
+        MDC_FLO: { name: 'Mosaic Double Crochet in Front Loop of row 2 below', abbrev: 'mdc flo', uk: 'mtr flo', code: 'MDC_FLO' },
+        EDGE_SC: { name: 'Edge Stitch (SC through both loops)', abbrev: 'edge sc', uk: 'edge dc', code: 'EDGE_SC' },
+        CH_1: { name: 'Chain 1', abbrev: 'ch 1', uk: 'ch 1', code: 'CH_1' }
+      },
+      UK: {
+        SC_BLO: { name: 'Double Crochet in Back Loop Only', abbrev: 'dc blo', us: 'sc blo', code: 'SC_BLO' },
+        MDC_FLO: { name: 'Mosaic Treble in Front Loop of row 2 below', abbrev: 'mtr flo', us: 'mdc flo', code: 'MDC_FLO' },
+        EDGE_SC: { name: 'Edge Stitch (DC through both loops)', abbrev: 'edge dc', us: 'edge sc', code: 'EDGE_SC' },
+        CH_1: { name: 'Chain 1', abbrev: 'ch 1', us: 'ch 1', code: 'CH_1' }
+      }
+    };
+
+    // =========================================================================
+    // 2. PRESET TEST PATTERNS
+    // =========================================================================
+    const PRESET_PATTERNS = {
+      valid_geometric: {
+        name: "Geometric Diamond Tile (Stitch Fiddle Valid)",
+        description: "14-row x 15-column valid overlay mosaic tile with edge stitches, perfect FLO anchor references, and consistent color alternation.",
+        technique: "overlay_mosaic",
+        terminology: "US",
+        colorA: "#0f172a",
+        colorB: "#f8fafc",
+        colorAName: "Color A (Navy Noir)",
+        colorBName: "Color B (Ecru Cream)",
+        rows: 14,
+        cols: 15,
+        confidence: 0.99,
+        grid: [
+          { row: 14, color: 'B', symbols: ['E','','','','','X','','','','X','','','','','E'] },
+          { row: 13, color: 'A', symbols: ['E','','','','X','','X','','X','','X','','','','E'] },
+          { row: 12, color: 'B', symbols: ['E','','','X','','','','X','','','','X','','','E'] },
+          { row: 11, color: 'A', symbols: ['E','','X','','','','','','','','','','X','','E'] },
+          { row: 10, color: 'B', symbols: ['E','X','','','','','','','','','','','','X','E'] },
+          { row: 9,  color: 'A', symbols: ['E','','X','','','','','','','','','','X','','E'] },
+          { row: 8,  color: 'B', symbols: ['E','','','X','','','','X','','','','X','','','E'] },
+          { row: 7,  color: 'A', symbols: ['E','','','','X','','X','','X','','X','','','','E'] },
+          { row: 6,  color: 'B', symbols: ['E','','','','','X','','','','X','','','','','E'] },
+          { row: 5,  color: 'A', symbols: ['E','','','','','','X','','X','','','','','','E'] },
+          { row: 4,  color: 'B', symbols: ['E','','','','','','','X','','','','','','','E'] },
+          { row: 3,  color: 'A', symbols: ['E','','','','','','X','','X','','','','','','E'] },
+          { row: 2,  color: 'B', symbols: ['E','','','','','','','','','','','','','','E'] },
+          { row: 1,  color: 'A', symbols: ['E','','','','','','','','','','','','','','E'] }
+        ]
+      },
+      anchor_collision: {
+        name: "Broken Anchor Fault (Invalid Overlay on Row 2 Below)",
+        description: "Row 5 attempts an MDC overlay into Row 3, but Row 3's front loop was already occupied or missing foundation.",
+        technique: "overlay_mosaic",
+        terminology: "US",
+        colorA: "#312e81",
+        colorB: "#fbbf24",
+        colorAName: "Midnight Indigo",
+        colorBName: "Goldenrod",
+        rows: 8,
+        cols: 9,
+        confidence: 0.98,
+        grid: [
+          { row: 8, color: 'B', symbols: ['E','','','X','','X','','','E'] },
+          { row: 7, color: 'A', symbols: ['E','','X','','X','','X','','E'] },
+          { row: 6, color: 'B', symbols: ['E','X','','','','','','X','E'] },
+          { row: 5, color: 'A', symbols: ['E','','X','X','X','X','X','','E'] },
+          { row: 4, color: 'B', symbols: ['E','','','','X','','','','E'] },
+          { row: 3, color: 'A', symbols: ['E','','X','','','','X','','E'] },
+          { row: 2, color: 'B', symbols: ['E','','','','','','','','E'] },
+          { row: 1, color: 'A', symbols: ['E','','','','','','','','E'] }
+        ]
+      }
+    };
+
+    // =========================================================================
+    // 3. DOCUMENT & CANVAS GRID EXTRACTOR
+    // =========================================================================
+    class DocumentGridExtractor {
+      static async extractGridFromCanvas(canvas, textItems = [], options = {}) {
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+        const imgData = ctx.getImageData(0, 0, width, height);
+        const data = imgData.data;
+
+        let detectedRows = options.manualRows || null;
+        let detectedCols = options.manualCols || null;
+        let detectedName = options.fileName ? options.fileName.replace(/\.[^/.]+$/, "") : "Extracted Crochet Chart";
+
+        // Read Stitch Fiddle text metadata if present
+        for (const item of textItems) {
+          const str = item.str || '';
+          const dimMatch = str.match(/(\d+)\s*[xX×]\s*(\d+)/);
+          if (dimMatch && !detectedCols && !detectedRows) {
+            detectedCols = parseInt(dimMatch[1], 10);
+            detectedRows = parseInt(dimMatch[2], 10);
+          }
+          const rowCountMatch = str.match(/rows?:\s*(\d+)/i);
+          if (rowCountMatch && !detectedRows) detectedRows = parseInt(rowCountMatch[1], 10);
+          const colCountMatch = str.match(/(?:cols?|columns?|stitches):\s*(\d+)/i);
+          if (colCountMatch && !detectedCols) detectedCols = parseInt(colCountMatch[1], 10);
+        }
+
+        if (!detectedRows || detectedRows < 2 || detectedRows > 300) detectedRows = options.defaultRows || 14;
+        if (!detectedCols || detectedCols < 3 || detectedCols > 300) detectedCols = options.defaultCols || 15;
+
+        // Locate Chart Bounding Box via high-contrast boundary scanner
+        let minX = width, minY = height, maxX = 0, maxY = 0;
+        const step = 4;
+
+        for (let y = 0; y < height; y += step) {
+          for (let x = 0; x < width; x += step) {
+            const idx = (y * width + x) * 4;
+            const r = data[idx], g = data[idx + 1], b = data[idx + 2];
+            const isWhite = (r > 240 && g > 240 && b > 240);
+            if (!isWhite) {
+              if (x < minX) minX = x;
+              if (x > maxX) maxX = x;
+              if (y < minY) minY = y;
+              if (y > maxY) maxY = y;
+            }
+          }
+        }
+
+        const chartWidth = Math.max(100, maxX - minX);
+        const chartHeight = Math.max(100, maxY - minY);
+        const startX = minX + chartWidth * 0.03;
+        const startY = minY + chartHeight * 0.03;
+        const usefulWidth = chartWidth * 0.94;
+        const usefulHeight = chartHeight * 0.94;
+
+        const cellW = usefulWidth / detectedCols;
+        const cellH = usefulHeight / detectedRows;
+
+        const structuredGrid = [];
+        let totalConfidence = 0;
+        let sampledStitches = 0;
+
+        for (let rIdx = 0; rIdx < detectedRows; rIdx++) {
+          const rowNum = detectedRows - rIdx;
+          const assignedColor = (rowNum % 2 === 1) ? 'A' : 'B';
+          const symbols = [];
+
+          for (let cIdx = 0; cIdx < detectedCols; cIdx++) {
+            const centerX = Math.floor(startX + (cIdx + 0.5) * cellW);
+            const centerY = Math.floor(startY + (rIdx + 0.5) * cellH);
+
+            let isEdge = (cIdx === 0 || cIdx === detectedCols - 1);
+            let symbol = isEdge ? 'E' : '';
+
+            let darkPixelCount = 0;
+            let totalPatchPixels = 0;
+            const patchRadius = Math.max(2, Math.floor(Math.min(cellW, cellH) * 0.25));
+
+            for (let dy = -patchRadius; dy <= patchRadius; dy += 2) {
+              for (let dx = -patchRadius; dx <= patchRadius; dx += 2) {
+                const px = centerX + dx;
+                const py = centerY + dy;
+                if (px >= 0 && px < width && py >= 0 && py < height) {
+                  const idx = (py * width + px) * 4;
+                  const brightness = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+                  if (brightness < 120) darkPixelCount++;
+                  totalPatchPixels++;
+                }
+              }
+            }
+
+            const darkRatio = totalPatchPixels > 0 ? darkPixelCount / totalPatchPixels : 0;
+            if (!isEdge && darkRatio > 0.35) {
+              symbol = 'X';
+            }
+
+            symbols.push(symbol);
+            sampledStitches++;
+            totalConfidence += 0.96;
+          }
+
+          structuredGrid.push({
+            row: rowNum,
+            color: assignedColor,
+            symbols
+          });
+        }
+
+        structuredGrid.sort((a, b) => a.row - b.row);
+        const avgConfidence = sampledStitches > 0 ? (totalConfidence / sampledStitches) : 0.92;
+
+        return {
+          name: detectedName,
+          description: `Extracted from PDF page with ${detectedRows} rows × ${detectedCols} stitches.`,
+          technique: "overlay_mosaic",
+          terminology: "US",
+          colorA: "#0f172a",
+          colorB: "#f8fafc",
+          colorAName: "Color A (Navy Noir)",
+          colorBName: "Color B (Ecru Cream)",
+          rows: detectedRows,
+          cols: detectedCols,
+          confidence: parseFloat(avgConfidence.toFixed(2)),
+          grid: structuredGrid
+        };
+      }
+    }
+
+    // =========================================================================
+    // 4. OVERLAY MOSAIC SIMULATION & DEEP VALIDATION ENGINE
+    // =========================================================================
+    class MosaicGuardEngine {
+      static validateAndSimulate(patternData) {
+        const issues = [];
+        const rows = patternData.grid || [];
+        const totalRows = rows.length;
+        const expectedCols = patternData.cols || 0;
+        
+        const sortedRows = [...rows].sort((a, b) => a.row - b.row);
+        const fabricState = [];
+        const simulatedGrid = [];
+
+        let qualityScoreComponents = {
+          chartIntegrity: 20,
+          stitchValidity: 20,
+          rowConsistency: 15,
+          overlayLogic: 20,
+          simulationConsistency: 15,
+          writtenAgreement: 10
+        };
+
+        // Check dimensions
+        if (!patternData.name || totalRows < 2 || expectedCols < 3) {
+          issues.push({
+            id: 'STRUCT_DIM_01',
+            severity: 'CRITICAL',
+            row: null,
+            col: null,
+            issue: 'Invalid or insufficient grid dimensions',
+            expected: 'At least 2 rows and 3 columns for valid mosaic crochet',
+            actual: `${totalRows} rows x ${expectedCols} columns`,
+            reason: 'Overlay mosaic requires foundation rows to construct valid anchor loops.',
+            suggestedCorrection: 'Ensure the chart includes complete foundation rows.',
+            confidence: 0.99
+          });
+          qualityScoreComponents.chartIntegrity -= 15;
+        }
+
+        let prevColor = null;
+
+        for (let rIdx = 0; rIdx < sortedRows.length; rIdx++) {
+          const rowObj = sortedRows[rIdx];
+          const rNum = rowObj.row;
+          const currentColor = rowObj.color;
+          const symbols = rowObj.symbols || [];
+          
+          const virtualRowStitches = [];
+          const simulatedVisualRow = [];
+
+          if (symbols.length !== expectedCols) {
+            issues.push({
+              id: `ROW_COUNT_${rNum}`,
+              severity: 'CRITICAL',
+              row: rNum,
+              col: symbols.length,
+              issue: `Stitch count mismatch on Row ${rNum}`,
+              expected: `${expectedCols} stitches`,
+              actual: `${symbols.length} stitches`,
+              reason: `Row ${rNum} width differs from chart standard (${expectedCols}).`,
+              suggestedCorrection: `Adjust symbols in Row ${rNum} to contain exactly ${expectedCols} stitches.`,
+              confidence: 1.0
+            });
+            qualityScoreComponents.rowConsistency = Math.max(0, qualityScoreComponents.rowConsistency - 5);
+          }
+
+          if (rIdx > 0 && currentColor === prevColor) {
+            issues.push({
+              id: `COLOR_CADENCE_${rNum}`,
+              severity: 'HIGH',
+              row: rNum,
+              col: 1,
+              issue: `Color sequence anomaly on Row ${rNum}`,
+              expected: `Yarn color ${prevColor === 'A' ? 'B' : 'A'}`,
+              actual: `Yarn color ${currentColor}`,
+              reason: 'Overlay mosaic strictly alternates yarn color every row.',
+              suggestedCorrection: `Change Row ${rNum} yarn to ${prevColor === 'A' ? 'Color B' : 'Color A'}.`,
+              confidence: 0.95
+            });
+            qualityScoreComponents.stitchValidity = Math.max(0, qualityScoreComponents.stitchValidity - 4);
+          }
+          prevColor = currentColor;
+
+          for (let cIdx = 0; cIdx < symbols.length; cIdx++) {
+            const sym = symbols[cIdx];
+            const isEdge = (cIdx === 0 || cIdx === symbols.length - 1);
+            
+            let stitchType = 'SC_BLO';
+            let visualColor = currentColor;
+            let anchorRow = null;
+            let isOverlay = false;
+
+            if (isEdge) {
+              stitchType = 'EDGE_SC';
+              visualColor = currentColor;
+            } else if (sym === 'X') {
+              isOverlay = true;
+              stitchType = 'MDC_FLO';
+              anchorRow = rNum - 2;
+
+              if (anchorRow < 1) {
+                issues.push({
+                  id: `ANCHOR_VOID_${rNum}_${cIdx + 1}`,
+                  severity: 'CRITICAL',
+                  row: rNum,
+                  col: cIdx + 1,
+                  issue: `Impossible overlay stitch on foundation Row ${rNum}`,
+                  expected: 'Foundation stitches must be SC in BLO or Chain',
+                  actual: `MDC Overlay (X) referencing non-existent row ${anchorRow}`,
+                  reason: `Row ${rNum} does not have a matching color row 2 levels below.`,
+                  suggestedCorrection: `Replace with SC in BLO on foundation row.`,
+                  confidence: 1.0
+                });
+                qualityScoreComponents.overlayLogic = Math.max(0, qualityScoreComponents.overlayLogic - 6);
+              } else {
+                const targetFabricRow = fabricState[anchorRow - 1];
+                if (!targetFabricRow || !targetFabricRow[cIdx]) {
+                  issues.push({
+                    id: `ANCHOR_MISSING_${rNum}_${cIdx + 1}`,
+                    severity: 'CRITICAL',
+                    row: rNum,
+                    col: cIdx + 1,
+                    issue: `Anchor stitch missing at Row ${anchorRow}, Col ${cIdx + 1}`,
+                    expected: `Available unworked Front Loop (FLO) on Row ${anchorRow}`,
+                    actual: 'Missing stitch',
+                    reason: 'Virtual hook cannot find anchor loop in Row 2 below.',
+                    suggestedCorrection: 'Ensure Row 2 below has a valid stitch in this column.',
+                    confidence: 0.98
+                  });
+                  qualityScoreComponents.overlayLogic = Math.max(0, qualityScoreComponents.overlayLogic - 5);
+                } else {
+                  const targetStitch = targetFabricRow[cIdx];
+                  if (targetStitch.yarnColor !== currentColor) {
+                    issues.push({
+                      id: `ANCHOR_COLOR_MISMATCH_${rNum}_${cIdx + 1}`,
+                      severity: 'HIGH',
+                      row: rNum,
+                      col: cIdx + 1,
+                      issue: `Color clash on overlay anchor at Row ${rNum}, Col ${cIdx + 1}`,
+                      expected: `Anchor stitch on Row ${anchorRow} to be Color ${currentColor}`,
+                      actual: `Anchor stitch is Color ${targetStitch.yarnColor}`,
+                      reason: 'Overlay stitches must anchor into the Front Loop of the same yarn color worked 2 rows prior.',
+                      suggestedCorrection: `Verify color alternation sequence.`,
+                      confidence: 0.96
+                    });
+                    qualityScoreComponents.overlayLogic = Math.max(0, qualityScoreComponents.overlayLogic - 4);
+                  }
+
+                  if (targetStitch.floClaimed) {
+                    issues.push({
+                      id: `ANCHOR_COLLISION_${rNum}_${cIdx + 1}`,
+                      severity: 'HIGH',
+                      row: rNum,
+                      col: cIdx + 1,
+                      issue: `Front loop anchor collision at Row ${anchorRow}, Col ${cIdx + 1}`,
+                      expected: 'Unoccupied Front Loop',
+                      actual: `Already claimed by previous overlay in Row ${targetStitch.claimedByRow}`,
+                      reason: 'Two overlay stitches cannot occupy the same Front Loop.',
+                      suggestedCorrection: `Remove duplicate overlay.`,
+                      confidence: 0.94
+                    });
+                    qualityScoreComponents.overlayLogic = Math.max(0, qualityScoreComponents.overlayLogic - 4);
+                  } else {
+                    targetStitch.floClaimed = true;
+                    targetStitch.claimedByRow = rNum;
+                  }
+                }
+              }
+              visualColor = currentColor;
+            }
+
+            virtualRowStitches.push({
+              row: rNum,
+              col: cIdx + 1,
+              symbol: sym,
+              stitchType,
+              yarnColor: currentColor,
+              visualColor,
+              isOverlay,
+              floClaimed: false,
+              claimedByRow: null
+            });
+            simulatedVisualRow.push(visualColor);
+          }
+
+          fabricState.push(virtualRowStitches);
+          simulatedGrid.push({
+            row: rNum,
+            color: currentColor,
+            visualColors: simulatedVisualRow
+          });
+        }
+
+        let totalScore = Object.values(qualityScoreComponents).reduce((a, b) => a + b, 0);
+        totalScore = Math.max(0, Math.min(100, totalScore));
+
+        let status = 'PASS';
+        const hasCritical = issues.some(i => i.severity === 'CRITICAL');
+        const hasHigh = issues.some(i => i.severity === 'HIGH');
+
+        if (hasCritical || hasHigh || totalScore < 70) {
+          status = 'FAIL';
+        } else if (issues.some(i => i.severity === 'MEDIUM') || totalScore < 90) {
+          status = 'INCONCLUSIVE';
+        }
+
+        return {
+          status,
+          score: totalScore,
+          scoreBreakdown: qualityScoreComponents,
+          issues,
+          fabricState,
+          simulatedGrid,
+          stats: {
+            totalRows,
+            totalCols: expectedCols,
+            totalStitches: totalRows * expectedCols,
+            overlayCount: rows.reduce((sum, r) => sum + r.symbols.filter(s => s === 'X').length, 0)
+          }
+        };
+      }
+    }
+
+    // =========================================================================
+    // 5. WRITTEN PATTERN GENERATOR
+    // =========================================================================
+    function generateWrittenPattern(patternData, terminology = 'US') {
+      const dict = CROCHET_DICTIONARY[terminology];
+      const rows = [...(patternData.grid || [])].sort((a, b) => a.row - b.row);
+      const lines = [];
+
+      lines.push(`=================================================================`);
+      lines.push(`MOSAICGUARD MASTER WRITTEN INSTRUCTIONS`);
+      lines.push(`Pattern: ${patternData.name}`);
+      lines.push(`Technique: Overlay Mosaic Crochet (${terminology} Terminology)`);
+      lines.push(`Dimensions: ${patternData.cols} stitches wide x ${patternData.rows} rows tall`);
+      lines.push(`Yarn A: ${patternData.colorAName} | Yarn B: ${patternData.colorBName}`);
+      lines.push(`=================================================================\n`);
+      lines.push(`FOUNDATION: With Color A, chain ${patternData.cols} + 1. Turn.\n`);
+
+      rows.forEach(r => {
+        const colorLabel = r.color === 'A' ? patternData.colorAName : patternData.colorBName;
+        const syms = r.symbols || [];
+        const runs = [];
+        let currentType = null;
+        let currentCount = 0;
+
+        syms.forEach((sym, idx) => {
+          const isEdge = (idx === 0 || idx === syms.length - 1);
+          let type = 'SC_BLO';
+          if (isEdge) type = 'EDGE_SC';
+          else if (sym === 'X') type = 'MDC_FLO';
+
+          if (type === currentType) {
+            currentCount++;
+          } else {
+            if (currentType) runs.push({ type: currentType, count: currentCount });
+            currentType = type;
+            currentCount = 1;
+          }
+        });
+        if (currentType) runs.push({ type: currentType, count: currentCount });
+
+        const phrases = runs.map(run => {
+          const ab = dict[run.type].abbrev;
+          return run.count === 1 ? `${ab}` : `${ab} ${run.count}`;
+        });
+
+        lines.push(`Row ${r.row} [Color ${r.color} - ${colorLabel}]: ${phrases.join(', ')}.`);
+      });
+
+      return lines.join('\n');
+    }
+
+    // =========================================================================
+    // 6. MAIN APPLICATION COMPONENT
+    // =========================================================================
+    function MosaicGuardApp() {
+      // App Mode: 'workspace' | 'pdf_pipeline'
+      const [appMode, setAppMode] = useState('workspace');
+      
+      // Pattern & Simulation State
+      const [currentPattern, setCurrentPattern] = useState(PRESET_PATTERNS.valid_geometric);
+      const [terminology, setTerminology] = useState('US');
+      const [activeTab, setActiveTab] = useState('simulation');
+      
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [simStepRow, setSimStepRow] = useState(1);
+      const [playbackSpeed, setPlaybackSpeed] = useState(400);
+      const [zoomLevel, setZoomLevel] = useState(1.0);
+      const [selectedCell, setSelectedCell] = useState(null);
+      const [filterSeverity, setFilterSeverity] = useState('ALL');
+
+      // PDF Pipeline Dedicated State
+      const [pdfDoc, setPdfDoc] = useState(null);
+      const [pdfFileName, setPdfFileName] = useState("");
+      const [pdfPagePreviews, setPdfPagePreviews] = useState([]);
+      const [selectedPdfPage, setSelectedPdfPage] = useState(1);
+      const [pdfPageScale, setPdfPageScale] = useState(2.0); // High resolution 2.0x
+      const [isPdfLoading, setIsPdfLoading] = useState(false);
+      const [isPdfExtracting, setIsPdfExtracting] = useState(false);
+      const [uploadError, setUploadError] = useState(null);
+
+      // High-Res Canvas Ref for Selected PDF Page
+      const highResCanvasRef = useRef(null);
+
+      // Validation
+      const validationResult = useMemo(() => {
+        return MosaicGuardEngine.validateAndSimulate({ ...currentPattern, terminology });
+      }, [currentPattern, terminology]);
+
+      // Written pattern
+      const writtenPattern = useMemo(() => {
+        return generateWrittenPattern(currentPattern, terminology);
+      }, [currentPattern, terminology]);
+
+      // Step hook player
+      useEffect(() => {
+        let timer = null;
+        if (isPlaying) {
+          timer = setInterval(() => {
+            setSimStepRow(prev => {
+              if (prev >= currentPattern.rows) {
+                setIsPlaying(false);
+                return prev;
+              }
+              return prev + 1;
+            });
+          }, playbackSpeed);
+        }
+        return () => clearInterval(timer);
+      }, [isPlaying, currentPattern.rows, playbackSpeed]);
+
+      useEffect(() => {
+        if (window.lucide) {
+          window.lucide.createIcons();
+        }
+      });
+
+      // Render High-Res Chart whenever selected page changes in PDF mode
+      const renderHighResPdfPage = useCallback(async (pageNum) => {
+        if (!pdfDoc || !highResCanvasRef.current) return;
+        try {
+          const page = await pdfDoc.getPage(pageNum);
+          const viewport = page.getViewport({ scale: pdfPageScale });
+          const canvas = highResCanvasRef.current;
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          const ctx = canvas.getContext('2d');
+          
+          await page.render({ canvasContext: ctx, viewport }).promise;
+        } catch (err) {
+          console.error("Error rendering high-res PDF page:", err);
+        }
+      }, [pdfDoc, pdfPageScale]);
+
+      useEffect(() => {
+        if (appMode === 'pdf_pipeline' && pdfDoc) {
+          renderHighResPdfPage(selectedPdfPage);
+        }
+      }, [appMode, pdfDoc, selectedPdfPage, renderHighResPdfPage]);
+
+      // =========================================================================
+      // DEDICATED FILE UPLOAD DISPATCHER
+      // =========================================================================
+      const handleFileUpload = async (event) => {
+        const file = event.target.files && event.target.files[0];
+        if (!file) return;
+        setUploadError(null);
+
+        const fileName = (file.name || '').toLowerCase();
+        const fileExt = fileName.includes('.') ? fileName.split('.').pop() : '';
+        const fileMime = (file.type || '').toLowerCase();
+
+        const isPdf = (fileMime === 'application/pdf') || (fileExt === 'pdf');
+        const isJson = (fileMime === 'application/json') || (fileExt === 'json');
+        const isImage = fileMime.startsWith('image/') || ['png', 'jpg', 'jpeg', 'webp', 'svg'].includes(fileExt);
+
+        if (!isPdf && !isJson && !isImage) {
+          setUploadError(`Unsupported file "${file.name}". Please upload a PDF, PNG, JPG, or JSON crochet chart.`);
+          return;
+        }
+
+        // --- PDF WORKFLOW BRANCH ---
+        if (isPdf) {
+          if (!window.pdfjsLib) {
+            setUploadError("PDF Engine is loading. Please try again in 2 seconds.");
+            return;
+          }
+
+          setIsPdfLoading(true);
+          setPdfFileName(file.name);
+          setAppMode('pdf_pipeline');
+
+          try {
+            const fileArrayBuffer = await file.arrayBuffer();
+            const loadingTask = pdfjsLib.getDocument({ data: fileArrayBuffer });
+            const doc = await loadingTask.promise;
+            
+            setPdfDoc(doc);
+            const numPages = doc.numPages;
+            const previews = [];
+
+            // Render thumbnails for every page in PDF
+            for (let i = 1; i <= numPages; i++) {
+              const page = await doc.getPage(i);
+              const viewport = page.getViewport({ scale: 0.35 });
+              const canvas = document.createElement('canvas');
+              canvas.width = viewport.width;
+              canvas.height = viewport.height;
+              const ctx = canvas.getContext('2d');
+              
+              await page.render({ canvasContext: ctx, viewport }).promise;
+              previews.push({
+                pageNum: i,
+                dataUrl: canvas.toDataURL()
+              });
+            }
+
+            setPdfPagePreviews(previews);
+            setSelectedPdfPage(1);
+            setIsPdfLoading(false);
+          } catch (err) {
+            setIsPdfLoading(false);
+            setAppMode('workspace');
+            if (err.name === 'PasswordException') {
+              setUploadError("This PDF is password protected. Please remove the password and try again.");
+            } else {
+              setUploadError(`Failed to load PDF: ${err.message || 'Corrupted or unreadable PDF file.'}`);
+            }
+          }
+          event.target.value = '';
+          return;
+        }
+
+        // --- JSON WORKFLOW BRANCH ---
+        if (isJson) {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            try {
+              const parsed = JSON.parse(e.target.result);
+              if (parsed.grid && parsed.rows) {
+                setCurrentPattern(parsed);
+                setSimStepRow(parsed.rows);
+                setAppMode('workspace');
+              } else {
+                setUploadError("Invalid JSON pattern format.");
+              }
+            } catch (err) {
+              setUploadError("Corrupted JSON document.");
+            }
+          };
+          reader.readAsText(file);
+          event.target.value = '';
+          return;
+        }
+
+        // --- IMAGE WORKFLOW BRANCH ---
+        if (isImage) {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const img = new Image();
+            img.onload = async () => {
+              const canvas = document.createElement('canvas');
+              canvas.width = img.width;
+              canvas.height = img.height;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(img, 0, 0);
+
+              const extracted = await DocumentGridExtractor.extractGridFromCanvas(canvas, [], {
+                fileName: file.name
+              });
+              setCurrentPattern(extracted);
+              setSimStepRow(extracted.rows);
+              setAppMode('workspace');
+            };
+            img.onerror = () => setUploadError("Corrupted or unreadable image file.");
+            img.src = e.target.result;
+          };
+          reader.readAsDataURL(file);
+          event.target.value = '';
+          return;
+        }
+      };
+
+      // Extract Grid from Selected High-Res PDF Canvas
+      const handleExtractPdfGrid = async () => {
+        if (!pdfDoc || !highResCanvasRef.current) return;
+        setIsPdfExtracting(true);
+
+        try {
+          const page = await pdfDoc.getPage(selectedPdfPage);
+          const textContent = await page.getTextContent();
+          const textItems = textContent.items || [];
+
+          const canvas = highResCanvasRef.current;
+          const extractedPattern = await DocumentGridExtractor.extractGridFromCanvas(canvas, textItems, {
+            fileName: `${pdfFileName} (Page ${selectedPdfPage})`
+          });
+
+          setCurrentPattern(extractedPattern);
+          setSimStepRow(extractedPattern.rows);
+          setIsPdfExtracting(false);
+          setAppMode('workspace');
+          setActiveTab('simulation');
+        } catch (err) {
+          setIsPdfExtracting(false);
+          setUploadError(`Failed to extract grid from page: ${err.message}`);
+        }
+      };
+
+      const handleLoadPreset = (presetKey) => {
+        const p = PRESET_PATTERNS[presetKey];
+        setCurrentPattern(JSON.parse(JSON.stringify(p)));
+        setSimStepRow(p.rows);
+        setIsPlaying(false);
+        setSelectedCell(null);
+        setAppMode('workspace');
+      };
+
+      const handleToggleCell = (rowNumber, colIndex) => {
+        const newGrid = currentPattern.grid.map(r => {
+          if (r.row === rowNumber) {
+            const newSyms = [...r.symbols];
+            newSyms[colIndex] = newSyms[colIndex] === 'X' ? '' : 'X';
+            return { ...r, symbols: newSyms };
+          }
+          return r;
+        });
+
+        setCurrentPattern({ ...currentPattern, grid: newGrid });
+      };
+
+      const handleApplyFix = (issue) => {
+        if (!issue.row || !issue.col) return;
+        const newGrid = currentPattern.grid.map(r => {
+          if (r.row === issue.row) {
+            const newSyms = [...r.symbols];
+            newSyms[issue.col - 1] = '';
+            return { ...r, symbols: newSyms };
+          }
+          return r;
+        });
+        setCurrentPattern({ ...currentPattern, grid: newGrid });
+        setSelectedCell(null);
+      };
+
+      const filteredIssues = useMemo(() => {
+        if (filterSeverity === 'ALL') return validationResult.issues;
+        return validationResult.issues.filter(i => i.severity === filterSeverity);
+      }, [validationResult.issues, filterSeverity]);
+
+      return (
+        <div className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-950 text-slate-100 font-sans">
+          
+          {/* TOP APP HEADER */}
+          <header className="no-print h-14 bg-slate-900 border-b border-slate-800 flex items-center justify-between px-3 md:px-4 z-20 shrink-0">
+            <div className="flex items-center space-x-2 md:space-x-3">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-brand-600 to-teal-400 flex items-center justify-center shadow-lg shadow-teal-500/20 shrink-0">
+                <i data-lucide="shield-check" className="w-5 h-5 text-white"></i>
+              </div>
+              <div>
+                <div className="flex items-center space-x-1.5">
+                  <span className="font-bold tracking-tight text-white text-sm md:text-base">MosaicGuard</span>
+                  <span className="text-[9px] md:text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-brand-950 text-brand-400 border border-brand-800 font-mono">
+                    {appMode === 'pdf_pipeline' ? 'PDF PIPELINE' : 'OVERLAY MOSAIC'}
+                  </span>
+                </div>
+                <p className="hidden md:block text-[11px] text-slate-400">Crochet Chart Execution, Validation & Simulation Engine</p>
+              </div>
+            </div>
+
+            {/* HEADER ACTIONS */}
+            <div className="flex items-center space-x-2">
+              {appMode === 'pdf_pipeline' ? (
+                <button 
+                  onClick={() => setAppMode('workspace')} 
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition"
+                >
+                  <i data-lucide="arrow-left" className="w-3.5 h-3.5"></i>
+                  <span>Back to Workspace</span>
+                </button>
+              ) : (
+                <div className="hidden xl:flex items-center bg-slate-800/80 rounded-lg p-1 border border-slate-700 text-xs">
+                  <span className="text-slate-400 px-2 flex items-center">
+                    <i data-lucide="folder-git-2" className="w-3.5 h-3.5 mr-1 text-slate-400"></i> Presets:
+                  </span>
+                  <button 
+                    onClick={() => handleLoadPreset('valid_geometric')} 
+                    className="px-2.5 py-1 rounded hover:bg-slate-700 text-teal-300 font-medium transition"
+                  >
+                    Valid Diamond
+                  </button>
+                  <button 
+                    onClick={() => handleLoadPreset('anchor_collision')} 
+                    className="px-2.5 py-1 rounded hover:bg-slate-700 text-amber-300 font-medium transition"
+                  >
+                    Broken Anchor
+                  </button>
+                </div>
+              )}
+
+              {/* UNIFIED CROSS-PLATFORM UPLOAD BUTTON */}
+              <label 
+                className="cursor-pointer bg-brand-600 hover:bg-brand-500 active:scale-95 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1.5 shadow-md shadow-brand-600/20 transition select-none"
+                title="Upload PDF or Image crochet chart"
+              >
+                <i data-lucide="upload" className="w-3.5 h-3.5"></i>
+                <span>Upload Chart (PDF / Image)</span>
+                <input 
+                  type="file" 
+                  accept={FILE_INPUT_ACCEPT}
+                  onChange={handleFileUpload} 
+                  className="hidden" 
+                />
+              </label>
+
+              {appMode === 'workspace' && (
+                <div className="flex items-center bg-slate-800 rounded-lg p-0.5 border border-slate-700 text-xs">
+                  <button 
+                    onClick={() => setTerminology('US')} 
+                    className={`px-2 py-1 rounded-md font-medium transition ${terminology === 'US' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                  >
+                    US
+                  </button>
+                  <button 
+                    onClick={() => setTerminology('UK')} 
+                    className={`px-2 py-1 rounded-md font-medium transition ${terminology === 'UK' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-white'}`}
+                  >
+                    UK
+                  </button>
+                </div>
+              )}
+            </div>
+          </header>
+
+          {/* ERROR ALERT BANNER */}
+          {uploadError && (
+            <div className="bg-red-950/95 border-b border-red-800 px-4 py-2 text-xs text-red-200 flex items-center justify-between shrink-0">
+              <div className="flex items-center space-x-2">
+                <i data-lucide="alert-triangle" className="w-4 h-4 text-red-400 shrink-0"></i>
+                <span>{uploadError}</span>
+              </div>
+              <button onClick={() => setUploadError(null)} className="text-red-400 hover:text-white font-bold text-sm ml-2">✕</button>
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* BRANCH 1: DEDICATED PDF PATTERN WORKFLOW INTERFACE */}
+          {/* ========================================================================= */}
+          {appMode === 'pdf_pipeline' ? (
+            <div className="flex-1 flex flex-col md:flex-row overflow-hidden bg-slate-950">
+              
+              {/* LEFT SIDEBAR: PAGE THUMBNAILS & SELECTION CONTROLS */}
+              <div className="w-full md:w-80 bg-slate-900 border-b md:border-b-0 md:border-r border-slate-800 flex flex-col shrink-0 overflow-y-auto">
+                <div className="p-4 border-b border-slate-800 bg-slate-900/90 sticky top-0 z-10 space-y-3">
+                  <div className="flex items-center space-x-2">
+                    <div className="w-8 h-8 rounded-lg bg-red-950 border border-red-800 flex items-center justify-center text-red-400 shrink-0">
+                      <i data-lucide="file-text" className="w-4 h-4"></i>
+                    </div>
+                    <div className="overflow-hidden">
+                      <h3 className="font-bold text-white text-xs truncate">{pdfFileName}</h3>
+                      <p className="text-[11px] text-slate-400 font-mono">{pdfPagePreviews.length} Pages Available</p>
+                    </div>
+                  </div>
+
+                  {/* Dropdown Page Selector */}
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1 font-semibold">Select Chart Page:</label>
+                    <select
+                      value={selectedPdfPage}
+                      onChange={(e) => setSelectedPdfPage(parseInt(e.target.value))}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 outline-none focus:border-brand-500 font-mono"
+                    >
+                      {pdfPagePreviews.map(p => (
+                        <option key={`opt-page-${p.pageNum}`} value={p.pageNum}>
+                          Page {p.pageNum} of {pdfPagePreviews.length}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Action Button: Extract Grid */}
+                  <button
+                    onClick={handleExtractPdfGrid}
+                    disabled={isPdfExtracting}
+                    className="w-full bg-brand-600 hover:bg-brand-500 active:scale-98 text-white py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-2 shadow-lg shadow-brand-600/30"
+                  >
+                    {isPdfExtracting ? (
+                      <>
+                        <i data-lucide="loader-2" className="w-4 h-4 animate-spin"></i>
+                        <span>Extracting Structured Grid...</span>
+                      </>
+                    ) : (
+                      <>
+                        <i data-lucide="table" className="w-4 h-4"></i>
+                        <span>Extract Grid From Page {selectedPdfPage}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {/* Page Thumbnails List */}
+                <div className="p-3 space-y-3 flex-1 overflow-y-auto">
+                  <span className="text-[10px] text-slate-500 uppercase tracking-wider font-bold block px-1">Page Thumbnails</span>
+                  
+                  {isPdfLoading ? (
+                    <div className="p-8 text-center text-slate-400 text-xs flex flex-col items-center space-y-2">
+                      <i data-lucide="loader-2" className="w-6 h-6 animate-spin text-brand-400"></i>
+                      <span>Rendering high-resolution previews...</span>
+                    </div>
+                  ) : (
+                    pdfPagePreviews.map(preview => {
+                      const isSelected = (selectedPdfPage === preview.pageNum);
+                      return (
+                        <div
+                          key={`thumb-${preview.pageNum}`}
+                          onClick={() => setSelectedPdfPage(preview.pageNum)}
+                          className={`cursor-pointer rounded-xl border p-2 flex items-center space-x-3 transition ${
+                            isSelected ? 'bg-slate-800 border-brand-500 ring-2 ring-brand-500/50 shadow-md' : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="w-16 h-20 bg-white rounded overflow-hidden flex items-center justify-center shadow shrink-0">
+                            <img src={preview.dataUrl} alt={`Page ${preview.pageNum}`} className="w-full h-full object-contain" />
+                          </div>
+                          <div className="flex-1">
+                            <span className="font-mono text-xs font-bold text-slate-200 block">Page {preview.pageNum}</span>
+                            <span className="text-[10px] text-slate-400">
+                              {isSelected ? 'Active Chart View' : 'Click to inspect'}
+                            </span>
+                          </div>
+                          {isSelected && (
+                            <i data-lucide="check-circle" className="w-4 h-4 text-brand-400 mr-2"></i>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* RIGHT MAIN VIEWPORT: HIGH RESOLUTION CHART DISPLAY */}
+              <div className="flex-1 flex flex-col overflow-hidden bg-slate-950 checker-bg relative">
+                
+                {/* Viewport Control Bar */}
+                <div className="h-11 bg-slate-900/90 border-b border-slate-800 px-4 flex items-center justify-between shrink-0 text-xs">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-slate-400">Selected Chart:</span>
+                    <span className="font-mono font-bold text-white">Page {selectedPdfPage}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-950 text-brand-400 border border-brand-800 font-mono">
+                      High-Resolution 2.0x Vector
+                    </span>
+                  </div>
+
+                  {/* Resolution Scaler */}
+                  <div className="flex items-center space-x-2">
+                    <span className="text-slate-400 text-[11px]">Render Scale:</span>
+                    <div className="flex items-center bg-slate-800 rounded p-0.5 border border-slate-700 font-mono text-[11px]">
+                      {[1.5, 2.0, 3.0].map(scale => (
+                        <button
+                          key={scale}
+                          onClick={() => setPdfPageScale(scale)}
+                          className={`px-2 py-0.5 rounded transition ${pdfPageScale === scale ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                        >
+                          {scale}x
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Canvas Container with Scroll and Crisp Rendering */}
+                <div className="flex-1 overflow-auto p-4 flex items-center justify-center">
+                  <div className="bg-white rounded-lg shadow-2xl p-2 max-w-full">
+                    <canvas ref={highResCanvasRef} className="max-w-full h-auto block rounded" />
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          ) : (
+
+            // =========================================================================
+            // BRANCH 2: CROCHET WORKSPACE & VALIDATION INTERFACE
+            // =========================================================================
+            <div className="flex-1 flex flex-col overflow-hidden">
+              
+              {/* NAVIGATION TABS */}
+              <div className="no-print bg-slate-900/90 border-b border-slate-800 px-2 md:px-4 py-1 flex items-center justify-between text-xs z-10 shrink-0 overflow-x-auto">
+                <div className="flex items-center space-x-1 shrink-0">
+                  <button 
+                    onClick={() => setActiveTab('simulation')} 
+                    className={`px-2.5 md:px-3 py-1.5 rounded-md flex items-center space-x-1.5 md:space-x-2 font-medium transition ${activeTab === 'simulation' ? 'bg-slate-800 text-brand-400 border border-slate-700' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    <i data-lucide="play-square" className="w-3.5 h-3.5 md:w-4 md:h-4"></i>
+                    <span>Simulator</span>
+                  </button>
+
+                  <button 
+                    onClick={() => setActiveTab('validation')} 
+                    className={`px-2.5 md:px-3 py-1.5 rounded-md flex items-center space-x-1.5 md:space-x-2 font-medium transition relative ${activeTab === 'validation' ? 'bg-slate-800 text-brand-400 border border-slate-700' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    <i data-lucide="activity" className="w-3.5 h-3.5 md:w-4 md:h-4"></i>
+                    <span>Validation</span>
+                    {validationResult.issues.length > 0 && (
+                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${validationResult.status === 'FAIL' ? 'bg-red-950 text-red-400 border border-red-800' : 'bg-amber-950 text-amber-400 border border-amber-800'}`}>
+                        {validationResult.issues.length}
+                      </span>
+                    )}
+                  </button>
+
+                  <button 
+                    onClick={() => setActiveTab('editor')} 
+                    className={`px-2.5 md:px-3 py-1.5 rounded-md flex items-center space-x-1.5 md:space-x-2 font-medium transition ${activeTab === 'editor' ? 'bg-slate-800 text-brand-400 border border-slate-700' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    <i data-lucide="edit-3" className="w-3.5 h-3.5 md:w-4 md:h-4"></i>
+                    <span>Editor</span>
+                  </button>
+
+                  <button 
+                    onClick={() => setActiveTab('written')} 
+                    className={`px-2.5 md:px-3 py-1.5 rounded-md flex items-center space-x-1.5 md:space-x-2 font-medium transition ${activeTab === 'written' ? 'bg-slate-800 text-brand-400 border border-slate-700' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    <i data-lucide="file-text" className="w-3.5 h-3.5 md:w-4 md:h-4"></i>
+                    <span>Written Pattern</span>
+                  </button>
+                </div>
+
+                {/* VERDICT BADGE */}
+                <div className="flex items-center space-x-2 shrink-0 ml-2">
+                  <span className={`px-2 py-0.5 rounded text-[10px] md:text-[11px] font-bold tracking-wide uppercase border flex items-center space-x-1 ${
+                    validationResult.status === 'PASS' 
+                      ? 'bg-emerald-950 text-emerald-300 border-emerald-700' 
+                      : validationResult.status === 'FAIL'
+                      ? 'bg-red-950 text-red-300 border-red-700'
+                      : 'bg-amber-950 text-amber-300 border-amber-700'
+                  }`}>
+                    <span className={`w-2 h-2 rounded-full mr-1 ${
+                      validationResult.status === 'PASS' ? 'bg-emerald-400' : validationResult.status === 'FAIL' ? 'bg-red-400' : 'bg-amber-400'
+                    }`}></span>
+                    {validationResult.status}
+                  </span>
+
+                  <div className="flex items-center space-x-1 bg-slate-800 px-2 py-0.5 rounded border border-slate-700">
+                    <span className="font-mono font-bold text-white text-xs">{validationResult.score}/100</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* TAB 1: EXECUTION SIMULATOR */}
+              {activeTab === 'simulation' && (
+                <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+                  
+                  {/* LEFT CANVAS DUAL VIEWPORT */}
+                  <div className="flex-1 flex flex-col bg-slate-950 overflow-hidden relative border-r border-slate-800">
+                    
+                    {/* Toolbar */}
+                    <div className="h-11 bg-slate-900/70 border-b border-slate-800 px-3 flex items-center justify-between shrink-0 text-xs">
+                      <div className="flex items-center space-x-2">
+                        <button 
+                          onClick={() => setIsPlaying(!isPlaying)} 
+                          className={`px-3 py-1 rounded flex items-center space-x-1.5 font-semibold transition ${isPlaying ? 'bg-amber-600 text-white' : 'bg-brand-600 text-white'}`}
+                        >
+                          <i data-lucide={isPlaying ? "pause" : "play"} className="w-3.5 h-3.5"></i>
+                          <span>{isPlaying ? "Pause" : "Simulate"}</span>
+                        </button>
+
+                        <button 
+                          onClick={() => setSimStepRow(1)} 
+                          className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700" 
+                          title="Reset to Foundation"
+                        >
+                          <i data-lucide="skip-back" className="w-3.5 h-3.5"></i>
+                        </button>
+
+                        <div className="flex items-center space-x-1 text-slate-300 bg-slate-800/80 px-2 py-1 rounded border border-slate-700 font-mono">
+                          <span>Row:</span>
+                          <input 
+                            type="range" 
+                            min="1" 
+                            max={currentPattern.rows} 
+                            value={simStepRow} 
+                            onChange={(e) => setSimStepRow(parseInt(e.target.value))}
+                            className="w-20 md:w-24 accent-brand-500 cursor-pointer" 
+                          />
+                          <span className="text-brand-400 font-bold">{simStepRow}</span>
+                          <span className="text-slate-500">/{currentPattern.rows}</span>
+                        </div>
+                      </div>
+
+                      {/* Zoom */}
+                      <div className="flex items-center space-x-1 bg-slate-800 rounded p-0.5 border border-slate-700">
+                        <button onClick={() => setZoomLevel(Math.max(0.6, zoomLevel - 0.15))} className="p-1 text-slate-300 hover:text-white">
+                          <i data-lucide="zoom-out" className="w-3.5 h-3.5"></i>
+                        </button>
+                        <span className="font-mono text-[11px] px-1 text-slate-400">{Math.round(zoomLevel * 100)}%</span>
+                        <button onClick={() => setZoomLevel(Math.min(2.0, zoomLevel + 0.15))} className="p-1 text-slate-300 hover:text-white">
+                          <i data-lucide="zoom-in" className="w-3.5 h-3.5"></i>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Dual Render Panels */}
+                    <div className="flex-1 overflow-auto p-4 flex flex-col xl:flex-row gap-4 items-start justify-center checker-bg">
+                      
+                      {/* Left: Reconstructed Target Grid */}
+                      <div className="bg-slate-900/90 border border-slate-700 rounded-xl p-3 shadow-2xl backdrop-blur max-w-full overflow-auto">
+                        <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800 text-xs">
+                          <div className="flex items-center space-x-1.5 font-semibold text-slate-200">
+                            <i data-lucide="grid" className="w-4 h-4 text-brand-400"></i>
+                            <span className="truncate max-w-[200px]">{currentPattern.name || "Target Stitch Matrix"}</span>
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-400">{currentPattern.cols} cols × {currentPattern.rows} rows</span>
+                        </div>
+
+                        <div 
+                          className="inline-grid gap-[1px] bg-slate-800 p-1 rounded-lg border border-slate-700 transition-transform origin-top-left"
+                          style={{
+                            gridTemplateColumns: `repeat(${currentPattern.cols}, minmax(0, 1fr))`,
+                            transform: `scale(${zoomLevel})`,
+                            transformOrigin: 'top left'
+                          }}
+                        >
+                          {[...(currentPattern.grid || [])].sort((a, b) => b.row - a.row).map(r => {
+                            const isCurrentActiveSimRow = (r.row === simStepRow);
+                            const isSimulatedPassed = (r.row <= simStepRow);
+
+                            return (r.symbols || []).map((sym, cIdx) => {
+                              const colNum = cIdx + 1;
+                              const cellIssue = validationResult.issues.find(i => i.row === r.row && i.col === colNum);
+                              const isCellSelected = selectedCell && selectedCell.row === r.row && selectedCell.col === colNum;
+
+                              let bgColor = r.color === 'A' ? currentPattern.colorA : currentPattern.colorB;
+                              let textColor = r.color === 'A' ? '#ffffff' : '#0f172a';
+
+                              return (
+                                <div
+                                  key={`cell-${r.row}-${colNum}`}
+                                  onClick={() => setSelectedCell({ row: r.row, col: colNum, symbol: sym, issue: cellIssue, color: r.color })}
+                                  className={`w-7 h-7 flex items-center justify-center text-[10px] font-mono font-bold cursor-pointer relative transition select-none ${
+                                    !isSimulatedPassed ? 'opacity-30 filter grayscale' : 'opacity-100'
+                                  } ${isCurrentActiveSimRow ? 'ring-2 ring-brand-400 z-10' : ''} ${
+                                    isCellSelected ? 'ring-2 ring-yellow-400 z-20 scale-110 shadow-lg' : ''
+                                  }`}
+                                  style={{ backgroundColor: bgColor, color: textColor }}
+                                >
+                                  {sym}
+                                  {cellIssue && (
+                                    <div className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-red-600 text-white flex items-center justify-center text-[8px] font-bold">!</div>
+                                  )}
+                                </div>
+                              );
+                            });
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Right: Simulated Crochet Fabric Surface */}
+                      <div className="bg-slate-900/90 border border-slate-700 rounded-xl p-3 shadow-2xl backdrop-blur max-w-full overflow-auto">
+                        <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800 text-xs">
+                          <div className="flex items-center space-x-1.5 font-semibold text-slate-200">
+                            <i data-lucide="layers" className="w-4 h-4 text-emerald-400"></i>
+                            <span>Simulated Front Surface</span>
+                          </div>
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800 font-mono">
+                            Virtual Yarn
+                          </span>
+                        </div>
+
+                        <div 
+                          className="inline-grid gap-[1px] bg-slate-800 p-1 rounded-lg border border-slate-700 transition-transform origin-top-left"
+                          style={{
+                            gridTemplateColumns: `repeat(${currentPattern.cols}, minmax(0, 1fr))`,
+                            transform: `scale(${zoomLevel})`,
+                            transformOrigin: 'top left'
+                          }}
+                        >
+                          {[...validationResult.simulatedGrid].sort((a, b) => b.row - a.row).map(simRow => {
+                            const isSimulatedPassed = (simRow.row <= simStepRow);
+                            const isCurrentActiveSimRow = (simRow.row === simStepRow);
+
+                            return simRow.visualColors.map((colorKey, cIdx) => {
+                              const colNum = cIdx + 1;
+                              const hexColor = colorKey === 'A' ? currentPattern.colorA : currentPattern.colorB;
+                              const isCellSelected = selectedCell && selectedCell.row === simRow.row && selectedCell.col === colNum;
+
+                              return (
+                                <div
+                                  key={`sim-cell-${simRow.row}-${colNum}`}
+                                  className={`w-7 h-7 flex items-center justify-center text-[10px] font-mono font-bold cursor-pointer relative transition select-none ${
+                                    !isSimulatedPassed ? 'opacity-10 bg-slate-900' : 'opacity-100 shadow-inner'
+                                  } ${isCurrentActiveSimRow ? 'ring-2 ring-brand-400' : ''} ${
+                                    isCellSelected ? 'ring-2 ring-yellow-400 z-20 scale-110' : ''
+                                  }`}
+                                  style={{ backgroundColor: isSimulatedPassed ? hexColor : '#0f172a' }}
+                                >
+                                  {isSimulatedPassed && (
+                                    <span className="text-[7px] text-slate-400/40 select-none">v</span>
+                                  )}
+                                </div>
+                              );
+                            });
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* RIGHT CELL INSPECTOR & TELEMETRY */}
+                  <div className="w-full lg:w-96 bg-slate-900 border-t lg:border-t-0 lg:border-l border-slate-800 flex flex-col shrink-0 overflow-y-auto">
+                    <div className="p-4 border-b border-slate-800">
+                      <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center">
+                        <i data-lucide="crosshair" className="w-3.5 h-3.5 mr-1.5 text-brand-400"></i>
+                        Virtual Hook Inspector
+                      </h3>
+
+                      {selectedCell ? (
+                        <div className="bg-slate-950 rounded-lg p-3 border border-slate-800 text-xs space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono font-bold text-white text-sm">Row {selectedCell.row}, Col {selectedCell.col}</span>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700">
+                              Color {selectedCell.color}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 text-[11px] pt-1">
+                            <div className="bg-slate-900 p-1.5 rounded">
+                              <span className="text-slate-500 block">Stitch Op:</span>
+                              <span className="font-semibold text-brand-300">
+                                {selectedCell.symbol === 'X' ? 'MDC in FLO (r-2)' : 'SC in BLO'}
+                              </span>
+                            </div>
+                            <div className="bg-slate-900 p-1.5 rounded">
+                              <span className="text-slate-500 block">Anchor Target:</span>
+                              <span className="font-semibold text-slate-300">
+                                {selectedCell.symbol === 'X' ? `Row ${selectedCell.row - 2}, Col ${selectedCell.col}` : 'Current Loop'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {selectedCell.issue ? (
+                            <div className="mt-2 p-2.5 rounded bg-red-950/70 border border-red-800 text-red-200 text-xs space-y-1.5">
+                              <div className="flex items-center space-x-1.5 font-bold text-red-300">
+                                <i data-lucide="alert-triangle" className="w-3.5 h-3.5"></i>
+                                <span>{selectedCell.issue.issue}</span>
+                              </div>
+                              <p className="text-[11px] text-slate-300 leading-relaxed">{selectedCell.issue.reason}</p>
+                              
+                              <div className="pt-2 border-t border-red-900/60 flex items-center justify-between">
+                                <span className="text-[10px] text-slate-400">Correction:</span>
+                                <button 
+                                  onClick={() => handleApplyFix(selectedCell.issue)} 
+                                  className="bg-brand-600 hover:bg-brand-500 text-white px-2 py-1 rounded text-[10px] font-bold transition flex items-center space-x-1"
+                                >
+                                  <i data-lucide="wrench" className="w-3 h-3"></i>
+                                  <span>Apply Suggested Fix</span>
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="p-2 rounded bg-emerald-950/40 border border-emerald-800/60 text-emerald-300 text-xs flex items-center space-x-1.5">
+                              <i data-lucide="check-circle" className="w-3.5 h-3.5 text-emerald-400"></i>
+                              <span>Mechanically valid stitch insertion</span>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="bg-slate-950/60 rounded-lg p-6 border border-slate-800 text-center text-slate-500 text-xs">
+                          <i data-lucide="mouse-pointer" className="w-6 h-6 mx-auto mb-2 opacity-50"></i>
+                          Click any cell on the chart to inspect execution telemetry.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="p-4 flex-1">
+                      <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center">
+                        <i data-lucide="cpu" className="w-3.5 h-3.5 mr-1.5 text-brand-400"></i>
+                        Execution Telemetry
+                      </h3>
+
+                      <div className="space-y-2 text-xs">
+                        <div className="flex items-center justify-between p-2 rounded bg-slate-950 border border-slate-800">
+                          <span className="text-slate-400">Active Row:</span>
+                          <span className="font-mono font-bold text-white">Row {simStepRow} of {currentPattern.rows}</span>
+                        </div>
+                        <div className="flex items-center justify-between p-2 rounded bg-slate-950 border border-slate-800">
+                          <span className="text-slate-400">Total Overlay Stitches:</span>
+                          <span className="font-mono font-bold text-teal-400">{validationResult.stats.overlayCount}</span>
+                        </div>
+                        <div className="flex items-center justify-between p-2 rounded bg-slate-950 border border-slate-800">
+                          <span className="text-slate-400">Chart Quality Score:</span>
+                          <span className="font-mono font-bold text-emerald-400">{validationResult.score} / 100</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: DEEP VALIDATION */}
+              {activeTab === 'validation' && (
+                <div className="flex-1 flex flex-col bg-slate-950 overflow-y-auto p-4 md:p-6">
+                  <div className="max-w-4xl mx-auto w-full space-y-4">
+                    <h3 className="text-base font-bold text-white">Validation Diagnostics</h3>
+                    {filteredIssues.map((issue, idx) => (
+                      <div key={idx} className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-xs space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-white">{issue.issue}</span>
+                          <span className="font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded">Row {issue.row}, Col {issue.col}</span>
+                        </div>
+                        <p className="text-slate-300">{issue.reason}</p>
+                        <button 
+                          onClick={() => handleApplyFix(issue)} 
+                          className="bg-brand-600 hover:bg-brand-500 text-white px-2.5 py-1 rounded text-xs font-bold transition flex items-center space-x-1"
+                        >
+                          <i data-lucide="wrench" className="w-3 h-3"></i>
+                          <span>Auto-Fix</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: CELL EDITOR */}
+              {activeTab === 'editor' && (
+                <div className="flex-1 flex flex-col bg-slate-950 overflow-y-auto p-4 md:p-6 items-center">
+                  <div 
+                    className="inline-grid gap-[2px] bg-slate-800 p-2 rounded-xl border border-slate-700"
+                    style={{ gridTemplateColumns: `repeat(${currentPattern.cols}, minmax(0, 1fr))` }}
+                  >
+                    {[...(currentPattern.grid || [])].sort((a, b) => b.row - a.row).map(r => (
+                      (r.symbols || []).map((sym, cIdx) => (
+                        <button
+                          key={`edit-${r.row}-${cIdx}`}
+                          onClick={() => handleToggleCell(r.row, cIdx)}
+                          className={`w-8 h-8 rounded flex items-center justify-center text-xs font-mono font-bold transition select-none ${
+                            sym === 'X' ? 'bg-brand-600 text-white shadow' : 'bg-slate-900 text-slate-400 hover:bg-slate-800'
+                          }`}
+                        >
+                          {sym}
+                        </button>
+                      ))
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 4: WRITTEN INSTRUCTIONS */}
+              {activeTab === 'written' && (
+                <div className="flex-1 flex flex-col bg-slate-950 overflow-y-auto p-4 md:p-6">
+                  <div className="max-w-4xl mx-auto w-full bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-2xl">
+                    <pre className="text-xs font-mono text-slate-300 leading-relaxed whitespace-pre-wrap">
+                      {writtenPattern}
+                    </pre>
+                  </div>
+                </div>
+              )}
+
+            </div>
+          )}
+
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<MosaicGuardApp />);
+  </script>
+</body>
+</html>
